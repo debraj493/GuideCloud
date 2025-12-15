@@ -17,6 +17,8 @@ RESET='\e[0m'
 animate_logo() {
   clear
   local logo=(
+
+
 "██████╗  ██║"
 "██╔══██╗ ██║"
 "██████╔╝ ██║"
@@ -119,7 +121,7 @@ case $choice in
   };
 
   idx = {
-    # Extensions from https://open-vsx.org (use "publisher.id")
+    # Extensions from https://raw.githubusercontent.com/debraj493/GuideCloud/refs/heads/main/vm.sh (use "publisher.id")
     extensions = [
       "Dart-Code.flutter"
       "Dart-Code.dart-code"
@@ -146,7 +148,7 @@ EOF
     read confirm
     case "$confirm" in
       [yY]*)
-      bash <(curl -fsSL https://raw.githubusercontent.com/debraj493/GuideCloud/refs/heads/main/vm.sh)")
+      bash <(curl -fsSL https://raw.githubusercontent.com/debraj493/GuideCloud/refs/heads/main/vm.sh)
         ;;
       [nN]*)
         echo -e "${RED}Operation cancelled.${RESET}"
