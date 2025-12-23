@@ -2,80 +2,72 @@
 set -euo pipefail
 
 # ========================================================
-# RYZEN 9 VM MANAGER - ULTIMATE CUSTOM VERSION
+# RYZEN 9 VM MANAGER - DISK & STABILITY FIXED
 # ========================================================
 
 VM_DIR="$HOME/vms"
 mkdir -p "$VM_DIR"
 
-# OS তালিকা (এখান থেকে আপনি OS সিলেক্ট করতে পারবেন)
+# OS সিলেকশন (কাস্টম অপশন)
 declare -A OS_LIST=(
     ["1"]="Ubuntu 22.04|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
     ["2"]="Ubuntu 24.04|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
     ["3"]="Debian 12|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
-    ["4"]="Fedora 40|https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-40-1.14.x86_64.qcow2"
 )
 
 display_header() {
     clear
     echo "=========================================================="
-    echo "    RYZEN 9 VM MANAGER - ADVANCED CONTROL (ENG)"
+    echo "    RYZEN 9 VM MANAGER - FULL CONTROL MODE"
     echo "=========================================================="
 }
 
 list_vms() {
     local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
-    if [ ${#vms[@]} -eq 0 ]; then
-        echo "No VMs found!"
-        return 1
-    fi
-    echo "Total VMs found: ${#vms[@]}"
-    echo "--------------------------------"
-    for i in "${!vms[@]}"; do
-        echo "$((i+1))) ${vms[$i]}"
-    done
-    echo "--------------------------------"
+    if [ ${#vms[@]} -eq 0 ]; then echo "No VMs found!"; return 1; fi
+    echo "Current VMs:"
+    for i in "${!vms[@]}"; do echo "$((i+1))) ${vms[$i]}"; done
     return 0
 }
 
 create_new_vm() {
     display_header
-    echo "[CREATE NEW VM]"
-    
-    # OS Selection Option
-    echo "Select Operating System:"
+    echo "[1] Select OS:"
     for key in $(echo "${!OS_LIST[@]}" | tr ' ' '\n' | sort); do
         echo "$key) ${OS_LIST[$key]%%|*}"
     done
-    read -p "Choice (1-4): " os_choice
-    
-    OS_NAME=${OS_LIST[$os_choice]%%|*}
+    read -p "Choice: " os_choice
     IMG_URL=${OS_LIST[$os_choice]#*|}
 
-    read -p "1. VM File Name (e.g. vps1): " VM_NAME
-    read -p "2. Hostname: " HOSTNAME
-    read -p "3. Username: " USERNAME
-    read -p "4. Password: " PASSWORD
-    read -p "5. RAM (MB) [2048]: " MEMORY
-    MEMORY=${MEMORY:-2048}
-    read -p "6. CPU Cores [2]: " CPUS
-    CPUS=${CPUS:-2}
-    read -p "7. Disk Size (e.g. 20G): " DISK_SIZE
-    read -p "8. SSH Port [3000]: " SSH_PORT
-    SSH_PORT=${SSH_PORT:-3000}
+    read -p "VM Name: " VM_NAME
+    read -p "Hostname: " HOSTNAME
+    read -p "Username: " USERNAME
+    read -p "Password: " PASSWORD
+    read -p "RAM (MB): " MEMORY
+    read -p "CPU Cores: " CPUS
+    
+    # ডিস্ক ফিক্স: শুধু সংখ্যা দিলে অটো G যোগ হবে
+    read -p "Disk Size (e.g. 200): " DISK_INPUT
+    if [[ "$DISK_INPUT" =~ ^[0-9]+$ ]]; then
+        DISK_SIZE="${DISK_INPUT}G"
+    else
+        DISK_SIZE="$DISK_INPUT"
+    fi
+
+    read -p "SSH Port: " SSH_PORT
 
     IMG_FILE="$VM_DIR/$VM_NAME.img"
     SEED_FILE="$VM_DIR/$VM_NAME-seed.iso"
 
     if [[ ! -f "$IMG_FILE" ]]; then
-        echo "Downloading $OS_NAME Image..."
+        echo "Downloading OS Image..."
         wget -q --show-progress "$IMG_URL" -O "$IMG_FILE"
     fi
 
-    echo "Configuring Disk..."
+    # ডিস্ক রিসাইজ এরর ফিক্স
     qemu-img resize "$IMG_FILE" "$DISK_SIZE"
 
-    # Cloud-init setup
+    # Cloud-init
     cat > user-data <<EOC
 #cloud-config
 hostname: $HOSTNAME
@@ -84,19 +76,11 @@ users:
   - name: $USERNAME
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
-    lock_passwd: false
     passwd: $(openssl passwd -6 "$PASSWORD")
-chpasswd:
-  list: |
-    root:$PASSWORD
-    $USERNAME:$PASSWORD
-  expire: false
 EOC
-    echo "instance-id: iid-$VM_NAME" > meta-data
-    cloud-localds "$SEED_FILE" user-data meta-data
-    rm user-data meta-data
+    cloud-localds "$SEED_FILE" user-data
+    rm user-data
 
-    # Save Config
     cat > "$VM_DIR/$VM_NAME.conf" <<EOC
 VM_NAME="$VM_NAME"
 HOSTNAME="$HOSTNAME"
@@ -108,8 +92,89 @@ DISK_SIZE="$DISK_SIZE"
 SSH_PORT="$SSH_PORT"
 IMG_FILE="$IMG_FILE"
 SEED_FILE="$SEED_FILE"
-OS_NAME="$OS_NAME"
 EOC
+    echo "Success: VM Created with $DISK_SIZE Disk!"
+    sleep 2
+}
+
+start_vm() {
+    display_header
+    if list_vms; then
+        read -p "Select VM Number: " idx
+        local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
+        source "$VM_DIR/${vms[$((idx-1))]}.conf"
+
+        echo "Starting $VM_NAME as Ryzen 9 5950X..."
+        # স্ট্যাবিলিটি ফিক্স করা স্টার্ট কমান্ড
+        qemu-system-x86_64 \
+            -enable-kvm \
+            -m "$MEMORY" \
+            -smp "$CPUS" \
+            -cpu host,vendor=AuthenticAMD,model_id="AMD Ryzen 9 5950X 16-Core Processor" \
+            -drive "file=$IMG_FILE,format=qcow2,if=virtio" \
+            -drive "file=$SEED_FILE,format=raw,if=virtio" \
+            -netdev user,id=n1,hostfwd=tcp::$SSH_PORT-:22 \
+            -device virtio-net-pci,netdev=n1 \
+            -nographic -serial mon:stdio
+    fi
+}
+
+edit_vm() {
+    display_header
+    if list_vms; then
+        read -p "Enter number to edit: " idx
+        local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
+        source "$VM_DIR/${vms[$((idx-1))]}.conf"
+        
+        echo "Full Edit Mode (Leave blank to keep current)"
+        read -p "New Hostname [$HOSTNAME]: " n_host
+        read -p "New RAM [$MEMORY]: " n_mem
+        read -p "New CPU [$CPUS]: " n_cpu
+        read -p "New Port [$SSH_PORT]: " n_port
+        read -p "New Password [$PASSWORD]: " n_pass
+
+        cat > "$VM_DIR/$VM_NAME.conf" <<EOC
+VM_NAME="$VM_NAME"
+HOSTNAME="${n_host:-$HOSTNAME}"
+USERNAME="$USERNAME"
+PASSWORD="${n_pass:-$PASSWORD}"
+MEMORY="${n_mem:-$MEMORY}"
+CPUS="${n_cpu:-$CPUS}"
+DISK_SIZE="$DISK_SIZE"
+SSH_PORT="${n_port:-$SSH_PORT}"
+IMG_FILE="$IMG_FILE"
+SEED_FILE="$SEED_FILE"
+EOC
+        echo "Configuration Updated!"
+        sleep 2
+    fi
+}
+
+delete_vm() {
+    display_header
+    if list_vms; then
+        read -p "Enter number to DELETE: " idx
+        local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
+        SELECTED_VM="${vms[$((idx-1))]}"
+        source "$VM_DIR/$SELECTED_VM.conf"
+        rm -f "$IMG_FILE" "$SEED_FILE" "$VM_DIR/$SELECTED_VM.conf"
+        echo "Deleted!"
+        sleep 2
+    fi
+}
+
+while true; do
+    display_header
+    echo "1) Create VM (OS Menu)  2) Start VM  3) Edit VM  4) Delete VM  5) Exit"
+    read -p "Select: " opt
+    case $opt in
+        1) create_new_vm ;;
+        2) start_vm ;;
+        3) edit_vm ;;
+        4) delete_vm ;;
+        5) exit 0 ;;
+    esac
+done
     echo "Success: VM Created!"
     sleep 2
 }
