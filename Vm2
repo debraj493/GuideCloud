@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ========================================================
-# GUIDECLOUD ULTIMATE VM MANAGER (RYZEN 9 ENABLED)
+# GUIDECLOUD PRO VM MANAGER (RYZEN 9 - FULL CUSTOM)
 # ========================================================
 
 VM_DIR="$HOME/vms"
@@ -11,28 +11,28 @@ mkdir -p "$VM_DIR"
 display_header() {
     clear
     echo "=========================================================="
-    echo "    RYZEN 9 VM MANAGER - FULL CONTROL & INFO"
+    echo "    RYZEN 9 VM MANAGER - ADVANCED CONTROL"
     echo "=========================================================="
 }
 
-# VM তালিকা দেখানোর ফাংশন
-list_vms() {
+# ১. কয়টি VM আছে এবং তাদের তথ্য দেখার ফাংশন
+list_and_count_vms() {
     local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \;))
+    echo "মোট ভিপিএস (VM) সংখ্যা: ${#vms[@]}"
     if [ ${#vms[@]} -eq 0 ]; then
         echo "কোনো VM পাওয়া যায়নি!"
         return 1
     fi
-    echo "বর্তমানে থাকা VM-এর তালিকা:"
+    echo "তালিকা:"
     for i in "${!vms[@]}"; do
         echo "$((i+1))) ${vms[$i]}"
     done
     return 0
 }
 
-# নির্দিষ্ট VM লোড করার ফাংশন
 get_vm_by_index() {
     local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \;))
-    read -p "VM নাম্বারটি দিন: " idx
+    read -p "তালিকা থেকে নাম্বারটি দিন: " idx
     if [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -le "${#vms[@]}" ] && [ "$idx" -gt 0 ]; then
         SELECTED_VM="${vms[$((idx-1))]}"
         source "$VM_DIR/$SELECTED_VM.conf"
@@ -43,33 +43,44 @@ get_vm_by_index() {
     fi
 }
 
+# ২. নতুন VM তৈরি (Hostname, RAM, CPU, Storage সব অপশনসহ)
 create_new_vm() {
     display_header
-    read -p "VM এর নাম দিন: " VM_NAME
-    read -p "ইউজার নেম দিন: " USERNAME
-    read -p "পাসওয়ার্ড দিন: " PASSWORD
+    read -p "VM এর নাম দিন (File Name): " VM_NAME
+    read -p "হোস্ট নেম দিন (Hostname): " HOSTNAME
+    read -p "ইউজার নেম দিন (Username): " USERNAME
+    read -p "পাসওয়ার্ড দিন (Password): " PASSWORD
     read -p "র‍্যাম (MB): " MEMORY
-    read -p "সিপিইউ কোর: " CPUS
+    read -p "সিপিইউ কোর (CPU): " CPUS
     read -p "স্টোরেজ (যেমন 20G): " DISK_SIZE
-    read -p "SSH পোর্ট (যেমন 3000): " SSH_PORT
+    read -p "SSH পোর্ট (যেমন 3333): " SSH_PORT
 
     IMG_FILE="$VM_DIR/$VM_NAME.img"
     SEED_FILE="$VM_DIR/$VM_NAME-seed.iso"
 
-    echo "ইমেজ তৈরি হচ্ছে..."
     if [[ ! -f "$IMG_FILE" ]]; then
+        echo "বেস ইমেজ ডাউনলোড হচ্ছে..."
         wget -q --show-progress https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img -O "$IMG_FILE"
     fi
     qemu-img resize "$IMG_FILE" "$DISK_SIZE"
 
+    # পাসওয়ার্ড ফিক্সড করার জন্য ক্লাউড কনফিগ
     cat > user-data <<EOF
 #cloud-config
+hostname: $HOSTNAME
 ssh_pwauth: true
+disable_root: false
 users:
   - name: $USERNAME
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
-    password: $(openssl passwd -6 "$PASSWORD")
+    lock_passwd: false
+    passwd: $(openssl passwd -6 "$PASSWORD")
+chpasswd:
+  list: |
+    root:$PASSWORD
+    $USERNAME:$PASSWORD
+  expire: false
 EOF
     echo "instance-id: iid-$VM_NAME" > meta-data
     cloud-localds "$SEED_FILE" user-data meta-data
@@ -78,6 +89,7 @@ EOF
     # কনফিগ সেভ
     cat > "$VM_DIR/$VM_NAME.conf" <<EOF
 VM_NAME="$VM_NAME"
+HOSTNAME="$HOSTNAME"
 MEMORY="$MEMORY"
 CPUS="$CPUS"
 DISK_SIZE="$DISK_SIZE"
@@ -91,24 +103,103 @@ EOF
     sleep 2
 }
 
-show_info() {
+# ৩. ইনফো দেখা (কতটি আছে এবং কি কি পাসওয়ার্ড)
+show_all_info() {
     display_header
-    if list_vms; then
+    if list_and_count_vms; then
+        echo "--------------------------------"
         if get_vm_by_index; then
-            echo "--------------------------------"
-            echo "VM নাম: $VM_NAME"
-            echo "ইউজার: $USERNAME"
-            echo "পাসওয়ার্ড: $PASSWORD"
-            echo "র‍্যাম: $MEMORY MB | সিপিইউ: $CPUS Core"
-            echo "SSH পোর্ট: $SSH_PORT"
-            echo "ডাউনলোড লিঙ্ক: ssh $USERNAME@localhost -p $SSH_PORT"
+            echo "--- $VM_NAME এর বিস্তারিত ---"
+            echo "হোস্ট নেম: $HOSTNAME"
+            echo "ইউজার: $USERNAME | পাসওয়ার্ড: $PASSWORD"
+            echo "র‍্যাম: $MEMORY MB | কোর: $CPUS"
+            echo "পোর্ট: $SSH_PORT"
             echo "--------------------------------"
             read -p "ফিরে যেতে এন্টার চাপুন..."
         fi
+    else
+        sleep 2
     fi
 }
 
 start_vm() {
+    display_header
+    if list_and_count_vms; then
+        if get_vm_by_index; then
+            echo "বুট হতে ২ মিনিট সময় দিন। লগইন না আসলে এন্টার চাপুন।"
+            qemu-system-x86_64 \
+                -enable-kvm \
+                -m "$MEMORY" \
+                -smp "$CPUS" \
+                -cpu EPYC,vendor=AuthenticAMD,model-id="AMD Ryzen 9 5950X 16-Core Processor" \
+                -drive "file=$IMG_FILE,format=qcow2,if=virtio" \
+                -drive "file=$SEED_FILE,format=raw,if=virtio" \
+                -netdev user,id=n1,hostfwd=tcp::$SSH_PORT-:22 \
+                -device virtio-net-pci,netdev=n1 \
+                -nographic -serial mon:stdio
+        fi
+    fi
+}
+
+# ৪. এডিট করার সময় হোস্ট নেম পরিবর্তনের সুযোগ
+edit_vm() {
+    display_header
+    if list_and_count_vms; then
+        if get_vm_by_index; then
+            echo "এডিট করছেন: $VM_NAME (ফাঁকা রাখলে আগেরটাই থাকবে)"
+            read -p "নতুন হোস্ট নেম [$HOSTNAME]: " n_host
+            read -p "নতুন র‍্যাম [$MEMORY]: " n_mem
+            read -p "নতুন কোর [$CPUS]: " n_cpu
+            read -p "নতুন পোর্ট [$SSH_PORT]: " n_port
+            
+            HOSTNAME=${n_host:-$HOSTNAME}
+            MEMORY=${n_mem:-$MEMORY}
+            CPUS=${n_cpu:-$CPUS}
+            SSH_PORT=${n_port:-$SSH_PORT}
+            
+            # সেভ করার আগে সিড ফাইল আপডেট করা (হোস্টনেম চেঞ্জ হলে জরুরি)
+            echo "instance-id: iid-$VM_NAME" > meta-data
+            echo "local-hostname: $HOSTNAME" >> meta-data
+            cloud-localds "$SEED_FILE" /dev/null meta-data
+            rm meta-data
+
+            cat > "$VM_DIR/$VM_NAME.conf" <<EOF
+VM_NAME="$VM_NAME"
+HOSTNAME="$HOSTNAME"
+MEMORY="$MEMORY"
+CPUS="$CPUS"
+DISK_SIZE="$DISK_SIZE"
+SSH_PORT="$SSH_PORT"
+USERNAME="$USERNAME"
+PASSWORD="$PASSWORD"
+IMG_FILE="$IMG_FILE"
+SEED_FILE="$SEED_FILE"
+EOF
+            echo "আপডেট সম্পন্ন!"
+            sleep 2
+        fi
+    fi
+}
+
+while true; do
+    display_header
+    echo "১) নতুন VM তৈরি (Hostname সহ)"
+    echo "২) VM লিস্ট ও ইনফো দেখুন"
+    echo "৩) VM স্টার্ট করুন (Ryzen 9)"
+    echo "৪) VM এডিট করুন (Hostname/RAM/CPU)"
+    echo "৫) VM ডিলিট করুন"
+    echo "৬) এক্সিট"
+    read -p "অপশন দিন: " opt
+    case $opt in
+        1) create_new_vm ;;
+        2) show_all_info ;;
+        3) start_vm ;;
+        4) edit_vm ;;
+        5) # ডিলিট লজিক আগের মতোই
+           display_header; if list_and_count_vms; then if get_vm_by_index; then rm -f "$IMG_FILE" "$SEED_FILE" "$VM_DIR/$SELECTED_VM.conf"; echo "ডিলিট হয়েছে"; sleep 2; fi; fi ;;
+        6) exit 0 ;;
+    esac
+done
     display_header
     if list_vms; then
         if get_vm_by_index; then
