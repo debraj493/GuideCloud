@@ -1,8 +1,9 @@
+cat << 'EOF' > vm_manager.sh
 #!/bin/bash
 set -euo pipefail
 
 # ========================================================
-# GUIDECLOUD PRO VM MANAGER (RYZEN 9 - FULL ENGLISH)
+# GUIDECLOUD PRO VM MANAGER (RYZEN 9 - 100% ENGLISH)
 # ========================================================
 
 VM_DIR="$HOME/vms"
@@ -11,66 +12,67 @@ mkdir -p "$VM_DIR"
 display_header() {
     clear
     echo "=========================================================="
-    echo "    RYZEN 9 VM MANAGER - ADVANCED CONTROL"
+    echo "    RYZEN 9 VM MANAGER - ADVANCED CONTROL (ENG)"
     echo "=========================================================="
 }
 
-# 1. Function to list and count all VMs
-list_and_count_vms() {
-    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \;))
+# 1. Function to list all VMs
+list_vms() {
+    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
     echo "Total VMs found: ${#vms[@]}"
     if [ ${#vms[@]} -eq 0 ]; then
         echo "No VMs found!"
         return 1
     fi
-    echo "VM List:"
+    echo "--------------------------------"
     for i in "${!vms[@]}"; do
         echo "$((i+1))) ${vms[$i]}"
     done
+    echo "--------------------------------"
     return 0
 }
 
-# Helper to select VM by number
+# Select VM by Number
 get_vm_by_index() {
-    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \;))
-    read -p "Enter VM number from list: " idx
+    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
+    read -p "Enter VM number from the list: " idx
     if [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -le "${#vms[@]}" ] && [ "$idx" -gt 0 ]; then
         SELECTED_VM="${vms[$((idx-1))]}"
         source "$VM_DIR/$SELECTED_VM.conf"
         return 0
     else
-        echo "Invalid selection!"
+        echo "Error: Invalid selection!"
         return 1
     fi
 }
 
-# 2. Function to create a new VM (With Hostname, RAM, CPU, Storage)
+# 2. Function to Create New VM
 create_new_vm() {
     display_header
-    read -p "Enter VM Name (File Name): " VM_NAME
-    read -p "Enter Hostname: " HOSTNAME
-    read -p "Enter Username: " USERNAME
-    read -p "Enter Password: " PASSWORD
-    read -p "Enter RAM (MB): " MEMORY
-    read -p "Enter CPU Cores: " CPUS
-    read -p "Enter Disk Size (e.g., 20G): " DISK_SIZE
-    read -p "Enter SSH Port (e.g., 3333): " SSH_PORT
+    echo "[CREATE NEW VM]"
+    read -p "1. VM File Name: " VM_NAME
+    read -p "2. Hostname: " HOSTNAME
+    read -p "3. Username: " USERNAME
+    read -p "4. Password: " PASSWORD
+    read -p "5. RAM (MB) [e.g. 2048]: " MEMORY
+    read -p "6. CPU Cores [e.g. 2]: " CPUS
+    read -p "7. Disk Size [e.g. 20G]: " DISK_SIZE
+    read -p "8. SSH Port [e.g. 3000]: " SSH_PORT
 
     IMG_FILE="$VM_DIR/$VM_NAME.img"
     SEED_FILE="$VM_DIR/$VM_NAME-seed.iso"
 
     if [[ ! -f "$IMG_FILE" ]]; then
-        echo "Downloading base image..."
+        echo "Downloading OS Image... Please wait."
         wget -q --show-progress https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img -O "$IMG_FILE"
     fi
     qemu-img resize "$IMG_FILE" "$DISK_SIZE"
 
-    # Cloud-init for proper password and hostname setup
-    cat > user-data <<EOF
+    # Cloud-init config
+    cat > user-data <<EOC
 #cloud-config
 hostname: $HOSTNAME
 ssh_pwauth: true
-disable_root: false
 users:
   - name: $USERNAME
     sudo: ALL=(ALL) NOPASSWD:ALL
@@ -82,13 +84,13 @@ chpasswd:
     root:$PASSWORD
     $USERNAME:$PASSWORD
   expire: false
-EOF
+EOC
     echo "instance-id: iid-$VM_NAME" > meta-data
     cloud-localds "$SEED_FILE" user-data meta-data
     rm user-data meta-data
 
-    # Save Config
-    cat > "$VM_DIR/$VM_NAME.conf" <<EOF
+    # Save Configuration File
+    cat > "$VM_DIR/$VM_NAME.conf" <<EOC
 VM_NAME="$VM_NAME"
 HOSTNAME="$HOSTNAME"
 MEMORY="$MEMORY"
@@ -99,38 +101,36 @@ USERNAME="$USERNAME"
 PASSWORD="$PASSWORD"
 IMG_FILE="$IMG_FILE"
 SEED_FILE="$SEED_FILE"
-EOF
-    echo "VM Created Successfully!"
+EOC
+    echo "Success: VM '$VM_NAME' Created!"
     sleep 2
 }
 
-# 3. Function to show all Info and list VMs
-show_all_info() {
+# 3. Show VM Details
+show_info() {
     display_header
-    if list_and_count_vms; then
-        echo "--------------------------------"
+    if list_vms; then
         if get_vm_by_index; then
             echo "--- Details for $VM_NAME ---"
-            echo "Hostname: $HOSTNAME"
-            echo "User: $USERNAME | Password: $PASSWORD"
-            echo "RAM: $MEMORY MB | CPU: $CPUS Cores"
-            echo "SSH Port: $SSH_PORT"
-            echo "Connection: ssh $USERNAME@localhost -p $SSH_PORT"
+            echo "Hostname : $HOSTNAME"
+            echo "User     : $USERNAME"
+            echo "Password : $PASSWORD"
+            echo "RAM/CPU  : $MEMORY MB / $CPUS Cores"
+            echo "SSH Port : $SSH_PORT"
+            echo "SSH Cmd  : ssh $USERNAME@localhost -p $SSH_PORT"
             echo "--------------------------------"
-            read -p "Press Enter to go back..."
+            read -p "Press Enter to return to menu..."
         fi
-    else
-        sleep 2
     fi
 }
 
-# 4. Function to start VM (Ryzen 9 Mode)
+# 4. Start VM (Ryzen 9 Mode)
 start_vm() {
     display_header
-    if list_and_count_vms; then
+    if list_vms; then
         if get_vm_by_index; then
-            echo "Booting VM... Please wait 1-2 minutes for password to sync."
-            echo "If login prompt doesn't appear, press Enter."
+            echo "Starting $VM_NAME as Ryzen 9 5950X..."
+            echo "Note: Wait 1-2 minutes for boot. If blank, press Enter."
             qemu-system-x86_64 \
                 -enable-kvm \
                 -m "$MEMORY" \
@@ -145,15 +145,15 @@ start_vm() {
     fi
 }
 
-# 5. Function to edit VM details
+# 5. Edit VM
 edit_vm() {
     display_header
-    if list_and_count_vms; then
+    if list_vms; then
         if get_vm_by_index; then
-            echo "Editing: $VM_NAME (Leave blank to keep current value)"
+            echo "Editing $VM_NAME (Leave blank to keep current value)"
             read -p "New Hostname [$HOSTNAME]: " n_host
             read -p "New RAM [$MEMORY]: " n_mem
-            read -p "New CPU Cores [$CPUS]: " n_cpu
+            read -p "New CPU [$CPUS]: " n_cpu
             read -p "New SSH Port [$SSH_PORT]: " n_port
             
             HOSTNAME=${n_host:-$HOSTNAME}
@@ -161,13 +161,8 @@ edit_vm() {
             CPUS=${n_cpu:-$CPUS}
             SSH_PORT=${n_port:-$SSH_PORT}
             
-            # Update seed file for hostname changes
-            echo "instance-id: iid-$VM_NAME" > meta-data
-            echo "local-hostname: $HOSTNAME" >> meta-data
-            cloud-localds "$SEED_FILE" /dev/null meta-data
-            rm meta-data
-
-            cat > "$VM_DIR/$VM_NAME.conf" <<EOF
+            # Save updated config
+            cat > "$VM_DIR/$VM_NAME.conf" <<EOC
 VM_NAME="$VM_NAME"
 HOSTNAME="$HOSTNAME"
 MEMORY="$MEMORY"
@@ -178,39 +173,35 @@ USERNAME="$USERNAME"
 PASSWORD="$PASSWORD"
 IMG_FILE="$IMG_FILE"
 SEED_FILE="$SEED_FILE"
-EOF
+EOC
             echo "Update Successful!"
             sleep 2
         fi
     fi
 }
 
-# Main Menu Loop
+# Main Menu
 while true; do
     display_header
-    echo "1) Create New VM (with Hostname)"
-    echo "2) List VMs & Show Info"
+    echo "1) Create New VM"
+    echo "2) Show VM List & Info"
     echo "3) Start VM (Ryzen 9 Mode)"
-    echo "4) Edit VM (Hostname/RAM/CPU)"
+    echo "4) Edit VM Configuration"
     echo "5) Delete VM"
     echo "6) Exit"
-    read -p "Select an option: " opt
+    echo "--------------------------------"
+    read -p "Select Option: " opt
     case $opt in
         1) create_new_vm ;;
-        2) show_all_info ;;
+        2) show_info ;;
         3) start_vm ;;
         4) edit_vm ;;
-        5) 
-           display_header
-           if list_and_count_vms; then 
-               if get_vm_by_index; then 
-                   rm -f "$IMG_FILE" "$SEED_FILE" "$VM_DIR/$SELECTED_VM.conf"
-                   echo "VM Deleted successfully."
-                   sleep 2
-               fi
-           fi ;;
+        5) display_header; if list_vms; then if get_vm_by_index; then rm -f "$IMG_FILE" "$SEED_FILE" "$VM_DIR/$SELECTED_VM.conf"; echo "VM Deleted!"; sleep 2; fi; fi ;;
         6) exit 0 ;;
-        *) echo "Invalid option!"; sleep 1 ;;
     esac
 done
+EOF
+
+chmod +x vm_manager.sh
+./vm_manager.sh
 
