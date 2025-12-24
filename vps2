@@ -1,0 +1,150 @@
+#!/bin/bash
+set -euo pipefail
+
+# ========================================================
+# RYZEN 9 VM MANAGER - MULTI OS & DOCKER SUPPORT
+# ========================================================
+
+VM_DIR="$HOME/vms"
+mkdir -p "$VM_DIR"
+
+# OS তালিকা (URLs)
+declare -A OS_IMAGES=(
+    ["1"]="Ubuntu 22.04|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+    ["2"]="Ubuntu 24.04|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+    ["3"]="Debian 12|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+    ["4"]="Parrot OS (Architect)|https://download.parrot.sh/parrot/iso/6.1/Parrot-architect-6.1_amd64.iso"
+)
+
+display_header() {
+    clear
+    echo "=========================================================="
+    echo "    RYZEN 9 VM MANAGER - ADVANCED CONTROL"
+    echo "=========================================================="
+}
+
+create_new_vm() {
+    display_header
+    echo "[CREATE NEW VM]"
+    
+    # OS সিলেকশন মেনু
+    echo "Select Operating System:"
+    echo "1) Ubuntu 22.04 (LTS)"
+    echo "2) Ubuntu 24.04 (LTS)"
+    echo "3) Debian 12 (Bookworm)"
+    echo "4) Parrot OS (Architect)"
+    read -p "Choice [1-4]: " os_choice
+
+    SELECTED_OS_DATA=${OS_IMAGES[$os_choice]}
+    OS_NAME=$(echo $SELECTED_OS_DATA | cut -d'|' -f1)
+    IMG_URL=$(echo $SELECTED_OS_DATA | cut -d'|' -f2)
+
+    read -p "1. VM Name: " VM_NAME
+    read -p "2. RAM (MB) [2048]: " MEMORY
+    MEMORY=${MEMORY:-2048}
+    read -p "3. CPU Cores [2]: " CPUS
+    CPUS=${CPUS:-2}
+    read -p "4. Disk Size (e.g. 200G): " DISK_SIZE
+    read -p "5. SSH Port [3000]: " SSH_PORT
+    SSH_PORT=${SSH_PORT:-3000}
+    read -p "6. Password: " PASSWORD
+
+    IMG_FILE="$VM_DIR/$VM_NAME.img"
+    SEED_FILE="$VM_DIR/$VM_NAME-seed.iso"
+
+    if [[ ! -f "$IMG_FILE" ]]; then
+        echo "Downloading $OS_NAME..."
+        wget -q --show-progress "$IMG_URL" -O "$IMG_FILE"
+    fi
+
+    echo "Resizing Disk to $DISK_SIZE..."
+    qemu-img resize "$IMG_FILE" "$DISK_SIZE"
+
+    # Cloud-init with Docker Support
+    # এটি ভিএম বুট হওয়ার সময় অটোমেটিক ডকার ইনস্টল করবে
+    cat > user-data <<EOC
+#cloud-config
+ssh_pwauth: true
+chpasswd:
+  list: |
+     root:$PASSWORD
+  expire: False
+users:
+  - name: root
+    shell: /bin/bash
+package_update: true
+packages:
+  - curl
+  - tar
+  - unzip
+  - docker.io
+  - docker-compose
+runcmd:
+  - systemctl enable --now docker
+  - echo "Docker installed and enabled" > /root/setup_complete
+EOC
+    cloud-localds "$SEED_FILE" user-data
+    rm user-data
+
+    # সেভ কনফিগারেশন
+    cat > "$VM_DIR/$VM_NAME.conf" <<EOC
+VM_NAME="$VM_NAME"
+MEMORY="$MEMORY"
+CPUS="$CPUS"
+DISK_SIZE="$DISK_SIZE"
+SSH_PORT="$SSH_PORT"
+PASSWORD="$PASSWORD"
+IMG_FILE="$IMG_FILE"
+SEED_FILE="$SEED_FILE"
+OS_NAME="$OS_NAME"
+EOC
+    echo "Success: $OS_NAME VM Created with Docker Support!"
+    sleep 2
+}
+
+start_vm() {
+    display_header
+    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
+    if [ ${#vms[@]} -eq 0 ]; then echo "No VMs found!"; return; fi
+    
+    for i in "${!vms[@]}"; do echo "$((i+1))) ${vms[$i]}"; done
+    read -p "Select VM Number: " idx
+    source "$VM_DIR/${vms[$((idx-1))]}.conf"
+
+    # Auto KVM/TCG Detection
+    local ACCEL="tcg"
+    local CPU_MODEL="max"
+    if [ -e /dev/kvm ]; then
+        ACCEL="kvm"
+        CPU_MODEL="host"
+        echo "KVM Acceleration Enabled."
+    fi
+
+    echo "Starting $VM_NAME ($OS_NAME) as Ryzen 9..."
+    qemu-system-x86_64 \
+        -accel "$ACCEL" \
+        -m "$MEMORY" \
+        -smp "$CPUS" \
+        -cpu "$CPU_MODEL",vendor=AuthenticAMD,model_id="AMD Ryzen 9 5950X 16-Core Processor" \
+        -drive "file=$IMG_FILE,format=qcow2,if=virtio" \
+        -drive "file=$SEED_FILE,format=raw,if=virtio" \
+        -netdev user,id=n1,hostfwd=tcp::$SSH_PORT-:22 \
+        -device virtio-net-pci,netdev=n1 \
+        -nographic -serial mon:stdio
+}
+
+# মেনু সিস্টেম
+while true; do
+    display_header
+    echo "1) Create New VM (Ubuntu/Debian/Parrot)"
+    echo "2) Start VM"
+    echo "3) Delete VM"
+    echo "0) Exit"
+    read -p "Select: " opt
+    case $opt in
+        1) create_new_vm ;;
+        2) start_vm ;;
+        3) read -p "Enter VM Name to delete: " d; rm -rf "$VM_DIR/$d"* && echo "Deleted"; sleep 1 ;;
+        0) exit 0 ;;
+    esac
+done
